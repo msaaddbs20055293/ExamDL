@@ -1,0 +1,80 @@
+using CSV
+using DataFrames
+using Flux
+using JLD2
+using Random
+
+# Load the dataset
+data = CSV.File("path/to/anomaly-free.csv"; delim=';')
+df = DataFrame(data)
+
+# Preprocess the data
+# Convert datetime to a usable format if necessary
+# Normalize or scale the features if needed
+
+# Create labels (1 for anomaly-free, 0 for anomalies)
+# Assuming you have a way to load the other 8 time series with anomalies
+labels = [1 for _ in 1:nrow(df)]  # Replace with actual labels for anomalies
+
+# Function to create windows
+function create_windows(data, labels, window_size)
+    X, y = [], []
+    for i in 1:(length(data) - window_size)
+        push!(X, data[i:(i + window_size - 1), :])
+        push!(y, labels[i + window_size - 1])
+    end
+    return X, y
+end
+
+# Create windows for different sizes
+X_30, y_30 = create_windows(df[:, 2:end], labels, 30)
+X_90, y_90 = create_windows(df[:, 2:end], labels, 90)
+X_270, y_270 = create_windows(df[:, 2:end], labels, 270)
+
+# Define the model
+function create_model()
+    model = Chain(
+        Dense(8 * 30, 64, relu),  # Adjust input size based on window size
+        Dense(64, 32, relu),
+        Dense(32, 1, σ)  # Output layer for binary classification
+    )
+    return model
+end
+
+# Training function
+function train_model(model, X, y, epochs=100, batch_size=128)
+    opt = ADAM(0.001, 0.001)  # AdamW optimizer
+    for epoch in 1:epochs
+        for i in 1:batch_size:length(X)
+            x_batch = X[i:min(i + batch_size - 1, end)]
+            y_batch = y[i:min(i + batch_size - 1, end)]
+            Flux.train!(loss, params(model), [(x_batch, y_batch)], opt)
+        end
+    end
+end
+
+# Save the model
+model = create_model()
+train_model(model, X_30, y_30)  # Train with window size 30
+JLD2.@save "trained_model.jld2" model
+
+# Function to calculate balanced accuracy
+function bal_acc(y_true, y_pred)
+    tp = sum((y_true .== 1) .& (y_pred .== 1))
+    tn = sum((y_true .== 0) .& (y_pred .== 0))
+    fp = sum((y_true .== 0) .& (y_pred .== 1))
+    fn = sum((y_true .== 1) .& (y_pred .== 0))
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (tn + fp)
+    return (sensitivity + specificity) / 2
+end
+
+# Load the model for testing
+JLD2.@load "trained_model.jld2" model
+
+# Test the model on hold-out test set
+# Assuming test_x and test_y are prepared similarly to training data
+predictions = model(test_x)
+balanced_accuracy = bal_acc(test_y, predictions)
+
+println("Balanced Accuracy: ", balanced_accuracy)

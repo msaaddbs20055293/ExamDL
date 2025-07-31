@@ -1,0 +1,49 @@
+using Flux
+using JLD2
+using Statistics
+
+# Step 1: Load and preprocess the dataset
+data = CSV.File("path/to/anomaly-free.csv"; delim=';')
+X = Matrix(data[:, 2:end])  # Features
+y = ...  # Create labels based on your criteria
+
+# Split into training and testing sets
+train_x, test_x, train_y, test_y = train_test_split(X, y, test_size=0.2)
+
+# Step 2: Define the model
+function create_model(input_size)
+    return Chain(
+        Dense(input_size, 64, relu),
+        Dense(64, 32, relu),
+        Dense(32, 1, σ)  # Output layer for binary classification
+    )
+end
+
+# Step 3: Training function
+function train_model(model, train_x, train_y, epochs)
+    opt = ADAMW(0.001, 0.001)
+    for epoch in 1:epochs
+        Flux.train!(loss, params(model), [(train_x, train_y)], opt)
+    end
+end
+
+# Step 4: Evaluate the model
+function evaluate_model(model, test_x, test_y)
+    preds = model(test_x)
+    bal_acc = balanced_accuracy(preds, test_y)
+    return bal_acc
+end
+
+# Step 5: Save the model
+JLD2.@save "trained_model.jld2" model
+
+# Step 6: Testing script (test.jl)
+using JLD2
+
+JLD2.@load "trained_model.jld2" model
+
+# Load test data and evaluate
+test_x = ...  # Load or preprocess your test data
+test_y = ...  # Load or preprocess your test labels
+bal_acc = evaluate_model(model, test_x, test_y)
+println("Balanced Accuracy: ", bal_acc)

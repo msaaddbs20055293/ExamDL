@@ -1,0 +1,68 @@
+using Flux
+using JLD2
+using Statistics
+using Random
+
+# Load the dataset
+data = CSV.File("path/to/anomaly-free.csv"; delim=';')
+X = Matrix(data[:, 2:end])  # Features
+y = ...  # Create labels based on your anomaly detection logic
+
+# Function to create time series windows
+function create_windows(X, y, window_size)
+    n_samples = size(X, 1) - window_size + 1
+    X_windows = [X[i:i+window_size-1, :] for i in 1:n_samples]
+    y_windows = [y[i + window_size - 1] for i in 1:n_samples]
+    return X_windows, y_windows
+end
+
+# Create windows for different sizes
+X_30, y_30 = create_windows(X, y, 30)
+X_90, y_90 = create_windows(X, y, 90)
+X_270, y_270 = create_windows(X, y, 270)
+
+# Define the model
+function create_model()
+    return Chain(
+        Dense(8, 64, relu),  # Assuming 8 features
+        Dense(64, 32, relu),
+        Dense(32, 1, σ)  # Output layer for binary classification
+    )
+end
+
+# Training function
+function train_model(X_train, y_train)
+    model = create_model()
+    opt = ADAM(0.001, 0.001)
+    loss(x, y) = Flux.Losses.binarycrossentropy(model(x), y)
+
+    for epoch in 1:100
+        for (x_batch, y_batch) in Flux.Data.DataLoader((X_train, y_train), batchsize=128)
+            Flux.train!(loss, params(model), [(x_batch, y_batch)], opt)
+        end
+    end
+    return model
+end
+
+# Train models for each window size
+model_30 = train_model(X_30, y_30)
+model_90 = train_model(X_90, y_90)
+model_270 = train_model(X_270, y_270)
+
+# Save the model
+JLD2.@save "model_30.jld2" model_30
+JLD2.@save "model_90.jld2" model_90
+JLD2.@save "model_270.jld2" model_270
+
+# Testing script
+function test_model(model, X_test, y_test)
+    predictions = model(X_test)
+    bal_acc = balanced_accuracy(predictions, y_test)
+    return bal_acc
+end
+
+# Load the model and test
+JLD2.@load "model_30.jld2" model_30
+# Assume X_test and y_test are prepared
+bal_acc = test_model(model_30, X_test, y_test)
+println("Balanced Accuracy: ", bal_acc)

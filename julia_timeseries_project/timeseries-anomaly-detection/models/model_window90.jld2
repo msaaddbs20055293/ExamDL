@@ -1,0 +1,69 @@
+using JLD2
+using Flux
+using Statistics
+using DataFrames
+using CSV
+
+# Load the dataset
+data = CSV.File("anomaly-free.csv"; delim=';')
+df = DataFrame(data)
+
+# Preprocess the data
+# Assuming df has a column named 'datetime' and the rest are features
+features = select(df, Not(:datetime))
+labels = [0]  # Label for anomaly-free data
+
+# Create sliding windows
+function create_windows(data, window_size)
+    windows = []
+    for i in 1:(size(data, 1) - window_size + 1)
+        push!(windows, data[i:(i + window_size - 1), :])
+    end
+    return windows
+end
+
+window_size = 30  # Change to 90 or 270 for different models
+windows = create_windows(features, window_size)
+
+# Convert to training data
+X_train = hcat(windows...)  # Combine windows into a single matrix
+y_train = repeat(labels, length(windows))  # Repeat labels for each window
+
+# Define the model
+model = Chain(
+    Dense(window_size * size(features, 2), 512, relu),
+    Dense(512, 256, relu),
+    Dense(256, 1, σ)  # Output layer for binary classification
+)
+
+# Define loss function and optimizer
+loss(x, y) = Flux.Losses.binarycrossentropy(model(x), y)
+opt = AdamW(0.001, 0.001)
+
+# Training loop
+for epoch in 1:100
+    Flux.train!(loss, params(model), [(X_train, y_train)], opt)
+end
+
+# Save the model
+JLD2.@save "trained_model.jld2" model
+
+# Testing
+function bal_acc(test_x, test_y, model)
+    preds = model(test_x) .> 0.5  # Thresholding at 0.5
+    tp = sum(preds .== 1 .& test_y .== 1)
+    tn = sum(preds .== 0 .& test_y .== 0)
+    fp = sum(preds .== 1 .& test_y .== 0)
+    fn = sum(preds .== 0 .& test_y .== 1)
+    
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (tn + fp)
+    
+    return (sensitivity + specificity) / 2  # Balanced accuracy
+end
+
+# Load the model for testing
+JLD2.@load "trained_model.jld2" model
+
+# Assuming test_x and test_y are prepared similarly to training data
+# bal_acc_value = bal_acc(test_x, test_y, model)

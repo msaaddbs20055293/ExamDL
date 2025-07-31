@@ -1,0 +1,81 @@
+using Flux
+using JLD2
+using Statistics
+
+# Load the dataset
+data = CSV.File("path/to/anomaly-free.csv"; delim=';')
+# Preprocess the data (normalize, etc.)
+# Create labels for the dataset
+# Assume `labels` is a vector of 0s and 1s indicating the class
+
+# Function to create time windows
+function create_windows(data, labels, window_size)
+    X, y = [], []
+    for i in 1:(length(data) - window_size)
+        push!(X, data[i:(i + window_size - 1), :])
+        push!(y, labels[i + window_size - 1])
+    end
+    return hcat(X...), y
+end
+
+# Create datasets for different window sizes
+X_30, y_30 = create_windows(data, labels, 30)
+X_90, y_90 = create_windows(data, labels, 90)
+X_270, y_270 = create_windows(data, labels, 270)
+
+# Define the model
+function create_model()
+    return Chain(
+        Dense(30, 64, relu),
+        Dense(64, 32, relu),
+        Dense(32, 1, σ)  # Output layer for binary classification
+    )
+end
+
+# Training function
+function train_model(X, y, model)
+    opt = ADAMW(0.001, 0.001)
+    for epoch in 1:100
+        for (x_batch, y_batch) in Flux.Data.DataLoader((X, y), batchsize=128)
+            Flux.train!(loss, params(model), [(x_batch, y_batch)], opt)
+        end
+    end
+    return model
+end
+
+# Train models for each window size
+model_30 = create_model()
+model_90 = create_model()
+model_270 = create_model()
+
+trained_model_30 = train_model(X_30, y_30, model_30)
+trained_model_90 = train_model(X_90, y_90, model_90)
+trained_model_270 = train_model(X_270, y_270, model_270)
+
+# Save the models
+@save "model_30.jld2" trained_model_30
+@save "model_90.jld2" trained_model_90
+@save "model_270.jld2" trained_model_270
+
+# Function to calculate balanced accuracy
+function bal_acc(y_true, y_pred)
+    tp = sum((y_true .== 1) .& (y_pred .== 1))
+    tn = sum((y_true .== 0) .& (y_pred .== 0))
+    fp = sum((y_true .== 0) .& (y_pred .== 1))
+    fn = sum((y_true .== 1) .& (y_pred .== 0))
+    
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (tn + fp)
+    
+    return (sensitivity + specificity) / 2
+end
+
+# Load the model for testing
+@load "model_30.jld2" trained_model_30
+
+# Test the model on hold-out test set
+# Assume `test_X` and `test_y` are your test data and labels
+predictions = trained_model_30(test_X)
+balanced_accuracy = bal_acc(test_y, predictions .> 0.5)
+
+println("Balanced Accuracy: ", balanced_accuracy)

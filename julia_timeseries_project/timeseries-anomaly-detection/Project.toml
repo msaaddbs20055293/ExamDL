@@ -1,0 +1,70 @@
+using CSV
+using DataFrames
+using Flux
+using JLD2
+using Random
+
+# Step 1: Load and preprocess the dataset
+data = CSV.File("path/to/anomaly-free.csv"; delim=';')
+df = DataFrame(data)
+
+# Create labels (1 for anomaly-free, 0 for anomalies)
+# Assuming you have a way to identify the anomaly time series
+labels = [1 for _ in 1:nrow(df)]  # Replace with actual labels for your dataset
+
+# Create sliding windows
+function create_windows(data, labels, window_size)
+    X, y = [], []
+    for i in 1:(length(data) - window_size + 1)
+        push!(X, data[i:(i + window_size - 1), :])
+        push!(y, labels[i + window_size - 1])
+    end
+    return X, y
+end
+
+# Create windows for different sizes
+X_30, y_30 = create_windows(df[:, 2:end], labels, 30)
+X_90, y_90 = create_windows(df[:, 2:end], labels, 90)
+X_270, y_270 = create_windows(df[:, 2:end], labels, 270)
+
+# Step 2: Define the model
+model = Chain(
+    Dense(8 * 30, 64, relu),  # Adjust input size based on window size
+    Dense(64, 32, relu),
+    Dense(32, 1, σ)  # Output layer for binary classification
+)
+
+# Step 3: Training
+function train_model(X, y, model)
+    opt = ADAM(0.001)
+    loss(x, y) = Flux.Losses.binarycrossentropy(model(x), y)
+    
+    for epoch in 1:100
+        for (x_batch, y_batch) in Flux.Data.DataLoader((X, y), batchsize=128)
+            Flux.train!(loss, params(model), [(x_batch, y_batch)], opt)
+        end
+    end
+end
+
+# Train models for different window sizes
+train_model(X_30, y_30, model)
+train_model(X_90, y_90, model)
+train_model(X_270, y_270, model)
+
+# Step 4: Save the model
+JLD2.@save "trained_model.jld2" model
+
+# Step 5: Testing
+# Load the model and evaluate
+function evaluate_model(test_data, test_labels)
+    JLD2.@load "trained_model.jld2" model
+    predictions = model(test_data)
+    bal_acc = calculate_balanced_accuracy(predictions, test_labels)
+    return bal_acc
+end
+
+# Define your test data and labels
+test_data = ...  # Load your test data
+test_labels = ...  # Load your test labels
+balanced_accuracy = evaluate_model(test_data, test_labels)
+println("Balanced Accuracy: ", balanced_accuracy)

@@ -1,0 +1,100 @@
+using Flux
+using JLD2
+using CSV
+using DataFrames
+using Random
+
+# Load the dataset
+data = CSV.File("anomaly-free.csv"; delim=';') |> DataFrame
+
+# Preprocess the data
+function preprocess_data(data)
+    # Convert datetime to a usable format and drop unnecessary columns
+    data.datetime = DateTime.(data.datetime)
+    # Normalize or scale your features if necessary
+    features = select(data, Not(:datetime))
+    return features
+end
+
+features = preprocess_data(data)
+
+# Create time series windows
+function create_windows(data, window_size)
+    X, y = [], []
+    for i in 1:(nrow(data) - window_size)
+        push!(X, data[i:(i + window_size - 1), :])
+        push!(y, data[i + window_size, :])
+    end
+    return hcat(X...), hcat(y...)
+end
+
+# Create windows for different sizes
+X_30, y_30 = create_windows(features, 30)
+X_90, y_90 = create_windows(features, 90)
+X_270, y_270 = create_windows(features, 270)
+
+# Split data into training and testing sets
+function split_data(X, y, train_ratio=0.8)
+    n_train = Int(size(X, 2) * train_ratio)
+    return X[:, 1:n_train], y[:, 1:n_train], X[:, n_train+1:end], y[:, n_train+1:end]
+end
+
+X_train_30, y_train_30, X_test_30, y_test_30 = split_data(X_30, y_30)
+X_train_90, y_train_90, X_test_90, y_test_90 = split_data(X_90, y_90)
+X_train_270, y_train_270, X_test_270, y_test_270 = split_data(X_270, y_270)
+
+# Define the model
+function create_model()
+    return Chain(
+        Dense(30, 64, relu),
+        Dense(64, 32, relu),
+        Dense(32, 1, σ)  # Binary classification
+    )
+end
+
+model = create_model()
+
+# Compile the model with AdamW optimizer
+opt = ADAM(0.001, weight_decay=0.001)
+
+# Training function
+function train_model!(model, X_train, y_train, epochs=100)
+    for epoch in 1:epochs
+        for i in 1:128:size(X_train, 2)
+            x_batch = X_train[:, i:min(i+127, end)]
+            y_batch = y_train[:, i:min(i+127, end)]
+            Flux.train!(loss, params(model), [(x_batch, y_batch)], opt)
+        end
+    end
+end
+
+# Train the model
+train_model!(model, X_train_30, y_train_30)
+
+# Save the model
+JLD2.@save "trained_model.jld2" model
+
+# Evaluation function
+function balanced_accuracy(y_true, y_pred)
+    # Calculate balanced accuracy
+    tp = sum((y_true .== 1) .& (y_pred .== 1))
+    tn = sum((y_true .== 0) .& (y_pred .== 0))
+    fp = sum((y_true .== 0) .& (y_pred .== 1))
+    fn = sum((y_true .== 1) .& (y_pred .== 0))
+    
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (tn + fp)
+    
+    return (sensitivity + specificity) / 2
+end
+
+# Load the model for evaluation
+JLD2.@load "trained_model.jld2" model
+
+# Make predictions on the test set
+y_pred_30 = model(X_test_30) .> 0.5  # Thresholding for binary classification
+
+# Calculate balanced accuracy
+bal_acc = balanced_accuracy(y_test_30, y_pred_30)
+
+println("Balanced Accuracy: ", bal_acc)

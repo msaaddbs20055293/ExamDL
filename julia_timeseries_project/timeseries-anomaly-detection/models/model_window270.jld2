@@ -1,0 +1,98 @@
+using Flux
+using JLD2
+using Statistics
+using DataFrames
+using CSV
+
+# Step 1: Load and preprocess the dataset
+data = CSV.File("anomaly-free.csv"; delim=';')
+df = DataFrame(data)
+
+# Convert datetime to a usable format and drop unnecessary columns
+df.datetime = DateTime.(df.datetime)
+X = Matrix(df[:, Not(:datetime)])  # Features
+y = [0]  # Label for anomaly-free data
+
+# Assuming you have 8 other datasets with anomalies, load them similarly
+# For example:
+# anomaly_data = CSV.File("anomaly_data.csv"; delim=';')
+# anomaly_df = DataFrame(anomaly_data)
+# X_anomaly = Matrix(anomaly_df[:, Not(:datetime)])
+# y_anomaly = [1]  # Label for anomaly data
+
+# Combine datasets
+# X = vcat(X, X_anomaly)
+# y = vcat(y, y_anomaly)
+
+# Step 2: Create train/test split
+train_size = Int(0.8 * size(X, 1))
+X_train, X_test = X[1:train_size, :], X[train_size+1:end, :]
+y_train, y_test = y[1:train_size], y[train_size+1:end]
+
+# Step 3: Define the model
+function create_model(input_size)
+    return Chain(
+        Dense(input_size, 64, relu),
+        Dense(64, 32, relu),
+        Dense(32, 1, σ)  # Sigmoid for binary classification
+    )
+end
+
+# Step 4: Training function
+function train_model(X_train, y_train, window_size)
+    model = create_model(window_size)
+    opt = ADAM(0.001, 0.001)  # AdamW with weight decay
+    loss(x, y) = Flux.Losses.binarycrossentropy(model(x), y)
+
+    # Create minibatches
+    for epoch in 1:100
+        for i in 1:128:size(X_train, 1)
+            x_batch = X_train[i:min(i+127, end), :]
+            y_batch = y_train[i:min(i+127, end)]
+            Flux.train!(loss, params(model), [(x_batch, y_batch)], opt)
+        end
+    end
+    return model
+end
+
+# Train models with different window sizes
+model_30 = train_model(X_train[1:30, :], y_train, 30)
+model_90 = train_model(X_train[1:90, :], y_train, 90)
+model_270 = train_model(X_train[1:270, :], y_train, 270)
+
+# Step 5: Save the model
+JLD2.@save "trained_model.jld2" model_30 model_90 model_270
+
+# Step 6: Testing script
+# Create a test.jl file
+open("test.jl", "w") do f
+    write(f, """
+using Flux
+using JLD2
+
+# Load the model
+JLD2.@load "trained_model.jld2" model_30 model_90 model_270
+
+# Load test data
+# X_test = ... # Load your test data here
+# y_test = ... # Load your test labels here
+
+# Function to calculate balanced accuracy
+function bal_acc(y_true, y_pred)
+    tp = sum((y_true .== 1) .& (y_pred .== 1))
+    tn = sum((y_true .== 0) .& (y_pred .== 0))
+    fp = sum((y_true .== 0) .& (y_pred .== 1))
+    fn = sum((y_true .== 1) .& (y_pred .== 0))
+    
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (tn + fp)
+    
+    return (sensitivity + specificity) / 2
+end
+
+# Evaluate the model
+# y_pred = model_30(X_test)  # Use the appropriate model
+# bal_acc_value = bal_acc(y_test, y_pred)
+# println("Balanced Accuracy: ", bal_acc_value)
+    """)
+end
